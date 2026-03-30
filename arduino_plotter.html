@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SerialScope — Arduino Plotter</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@300;400;500;600&display=swap');
+
+  :root {
+    --bg:     #f8f9fa;
+    --bg2:    #ffffff;
+    --bg3:    #f0f2f5;
+    --bg4:    #e4e7ec;
+    --border: #d1d5db;
+    --border2:#9ca3af;
+    --text:   #111827;
+    --text2:  #374151;
+    --text3:  #9ca3af;
+    --accent: #2563eb;
+    --green:  #059669;
+    --red:    #dc2626;
+    --amber:  #d97706;
+    --mono:   'JetBrains Mono', monospace;
+    --sans:   'Space Grotesk', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Header ── */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 14px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+
+  .logo {
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: -0.5px;
+    white-space: nowrap;
+  }
+  .logo span { color: var(--accent); }
+
+  .sep { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; }
+
+  select, input[type=number] {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 5px 9px;
+    border-radius: 6px;
+    outline: none;
+    cursor: pointer;
+    transition: border-color .15s;
+  }
+  select:hover, input[type=number]:hover { border-color: var(--border2); }
+  select:focus, input[type=number]:focus { border-color: var(--accent); }
+  input[type=number] { width: 80px; }
+
+  .btn {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    padding: 5px 13px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg3);
+    color: var(--text);
+    cursor: pointer;
+    transition: all .15s;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .btn:hover  { background: var(--bg4); border-color: var(--border2); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color:#fff; }
+  .btn.primary:hover { background: #2563eb; }
+  .btn.danger  { background: transparent; border-color: var(--red); color: var(--red); }
+  .btn.danger:hover { background: rgba(239,68,68,.1); }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--text3);
+    flex-shrink: 0;
+    transition: background .3s;
+  }
+  .status-dot.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+  .paused-badge {
+    display: none;
+    font-family: var(--mono);
+    font-size: 11px;
+    background: rgba(245,158,11,.12);
+    border: 1px solid var(--amber);
+    color: var(--amber);
+    padding: 2px 10px;
+    border-radius: 20px;
+  }
+  .paused-badge.visible { display: inline-block; }
+
+  .scroll-badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: rgba(59,130,246,.15);
+    border: 1px solid rgba(59,130,246,.4);
+    color: var(--accent);
+    cursor: pointer;
+    display: none;
+    transition: background .15s;
+  }
+  .scroll-badge:hover { background: rgba(59,130,246,.25); }
+  .scroll-badge.visible { display: inline-block; }
+
+  .no-serial-warn {
+    display: none;
+    background: rgba(239,68,68,.08);
+    border: 1px solid rgba(239,68,68,.3);
+    color: #fca5a5;
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 5px 12px;
+    border-radius: 6px;
+  }
+
+  /* ── Layout ── */
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: 196px;
+    flex-shrink: 0;
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .sidebar-title {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: var(--text3);
+    text-transform: uppercase;
+    padding: 10px 13px 8px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .channel-list { flex: 1; overflow-y: auto; padding: 6px; }
+  .channel-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px; border-radius: 6px;
+    cursor: pointer; transition: background .1s; user-select: none;
+  }
+  .channel-item:hover { background: var(--bg3); }
+  .channel-item.muted { opacity: .4; }
+  .ch-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .ch-name { font-family: var(--mono); font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ch-val  { font-family: var(--mono); font-size: 11px; color: var(--text2); min-width: 46px; text-align: right; }
+  .no-ch   { font-family: var(--mono); font-size: 11px; color: var(--text3); text-align: center; padding: 24px 10px; line-height: 1.9; }
+
+  /* ── Plot area ── */
+  .plot-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  .toolbar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 12px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0; flex-wrap: wrap;
+  }
+  .toolbar-label { font-family: var(--mono); font-size: 11px; color: var(--text3); }
+
+  .chart-wrap { flex: 1; position: relative; padding: 10px; min-height: 0; overflow: hidden; }
+
+  /* ── Bottom panel ── */
+  .bottom-panel {
+    height: 155px; flex-shrink: 0;
+    border-top: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    background: var(--bg2);
+  }
+  .panel-tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .tab {
+    font-family: var(--mono); font-size: 11px;
+    padding: 6px 15px; cursor: pointer; color: var(--text3);
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+    transition: color .15s; user-select: none;
+  }
+  .tab:hover { color: var(--text2); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .panel-body { flex: 1; overflow-y: auto; padding: 5px 10px; }
+
+  .mon-line { font-family: var(--mono); font-size: 11px; color: #111827; line-height: 1.7; white-space: pre-wrap; word-break: break-all; }
+  .mon-line.in  { color: #111827; }
+  .mon-line.sys { color: var(--text3); font-style: italic; }
+
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(138px,1fr)); gap: 7px; padding: 7px; }
+  .stat-card  { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 7px 11px; }
+  .stat-lbl   { font-family: var(--mono); font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
+  .stat-val   { font-family: var(--mono); font-size: 16px; font-weight: 700; }
+  .stat-unit  { font-size: 11px; color: var(--text3); margin-left: 3px; }
+
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Serial<span>Scope</span></div>
+  <div class="status-dot" id="statusDot"></div>
+  <select id="baudSel">
+    <option>300</option><option>1200</option><option>2400</option>
+    <option>4800</option><option>9600</option><option>19200</option>
+    <option>38400</option><option>57600</option><option>74880</option>
+    <option value="115200" selected>115200</option>
+    <option>230400</option><option>250000</option><option>500000</option>
+    <option>1000000</option><option>2000000</option>
+  </select>
+  <button class="btn primary" id="connectBtn" onclick="toggleConnect()">Connect</button>
+  <div class="sep"></div>
+  <button class="btn" id="pauseBtn" onclick="togglePause()" disabled>⏸ Pause</button>
+  <button class="btn" onclick="clearAll()">✕ Clear</button>
+  <button class="btn" onclick="exportCSV()">↓ CSV</button>
+  <div class="sep"></div>
+  <span class="toolbar-label">Points:</span>
+  <input type="number" id="pointsIn" value="500" min="50" max="10000" step="50" onchange="onPointsChange(this.value)">
+  <div class="sep"></div>
+  <button class="scroll-badge" id="resumeBtn" onclick="resumeScroll()" title="Click to resume auto-scroll">⟳ Live</button>
+  <span class="paused-badge" id="pausedBadge">PAUSED</span>
+  <div class="no-serial-warn" id="noSerialWarn">Web Serial not supported — use Chrome or Edge.</div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+    <div class="sidebar-title">Channels</div>
+    <div class="channel-list" id="chList">
+      <div class="no-ch">No data yet.<br>Connect your<br>Arduino.</div>
+    </div>
+  </div>
+
+  <div class="plot-area">
+    <div class="toolbar">
+      <span class="toolbar-label">Y-Scale:</span>
+      <span class="toolbar-label" id="yScaleLabel" style="color:var(--text2);font-size:11px">Auto</span>
+      <span class="toolbar-label" style="color:var(--text3);font-size:10px">&nbsp;· dbl-click Y axis to reset</span>
+    </div>
+
+    <div class="chart-wrap">
+      <canvas id="chart"></canvas>
+    </div>
+
+    <div class="bottom-panel">
+      <div class="panel-tabs">
+        <div class="tab active" onclick="switchTab('monitor',this)">Serial Monitor</div>
+        <div class="tab" onclick="switchTab('stats',this)">Statistics</div>
+      </div>
+      <div class="panel-body" id="monitorPanel">
+        <div class="mon-line sys">— SerialScope ready —</div>
+      </div>
+      <div class="panel-body" id="statsPanel" style="display:none;padding:0">
+        <div class="stats-grid" id="statsGrid"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  CONSTANTS & STATE
+// ═══════════════════════════════════════════════════════════
+const PALETTE = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#ec4899'];
+const BUFFER_MAX  = 100_000;  // max points stored per channel
+const MON_MAX     = 300;      // max monitor lines
+
+// Channel storage  name → { buf:[], color, hidden, last, min, max, sum, n }
+const channels = {};
+const chOrder  = [];
+
+// Timing
+let startTime   = null;
+let sampleCount = 0;
+
+// Window state — we OWN these values entirely; Chart.js just reads them
+let viewXMin = 0;
+let viewXMax = 10;        // default 10s window
+let windowSec = 10;       // current window width in seconds
+
+// Interaction state
+let autoScroll  = true;   // false = user panned away; reset to resume
+let isDragging  = false;
+let dragAxis    = null;
+let dragStartPx = 0;
+let dragStartMin = 0;
+let dragStartMax = 0;
+let mouseZone   = 'none'; // 'plot' | 'x' | 'y' | 'none'
+let mouseXpx    = 0;
+let mouseYpx    = 0;
+
+// Y state
+let yAuto = true;
+
+// Serial
+let connected = false;
+let port = null;
+let reader = null;
+let pipeAbortController = null;   // aborts pipeTo() on disconnect
+let pipeClosedPromise   = null;   // resolves when pipeTo() finishes unwinding
+
+// Misc
+let paused = false;
+let frameId = null;
+let monLines = 0;
+
+// ═══════════════════════════════════════════════════════════
+//  CHART SETUP
+// ═══════════════════════════════════════════════════════════
+const ctx = document.getElementById('chart').getContext('2d');
+const chartData = { datasets: [] };
+
+const chart = new Chart(ctx, {
+  type: 'line',
+  data: chartData,
+  options: {
+    animation:           false,
+    maintainAspectRatio: false,
+    normalized:          true,
+    parsing:             false,
+    spanGaps:            false,
+    layout: { padding: 0 },
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { display: false },
+      decimation: { enabled: true, algorithm: 'min-max' },
+      tooltip: {
+        enabled: true,
+        backgroundColor: '#13161d',
+        borderColor: '#2a2f3f', borderWidth: 1,
+        titleColor: '#8892a4',  bodyColor: '#e2e8f0',
+        titleFont: { family: 'JetBrains Mono', size: 11 },
+        bodyFont:  { family: 'JetBrains Mono', size: 11 },
+        callbacks: {
+          title: items => `t = ${items[0].parsed.x.toFixed(3)}s`,
+          label: item  => ` ${item.dataset.label}: ${item.parsed.y.toFixed(4)}`
+        }
+      }
+    },
+    scales: {
+      x: {
+        type: 'linear',
+        min: viewXMin,
+        max: viewXMax,
+        clip: true,
+        ticks: {
+          color: '#111827',
+          font: { family: 'JetBrains Mono', size: 10 },
+          maxTicksLimit: 8,
+          callback: v => v >= 60 ? `${(v/60).toFixed(1)}m` : `${v.toFixed(2)}s`
+        },
+        grid:   { color: '#d1d5db' },
+        border: { color: '#111827' }
+      },
+      y: {
+        ticks: {
+          color: '#111827',
+          font: { family: 'JetBrains Mono', size: 10 }
+        },
+        grid:   { color: '#d1d5db' },
+        border: { color: '#111827' }
+      }
+    }
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+//  RENDER LOOP  — runs every animation frame
+//  This is the single source of truth for what the chart shows
+// ═══════════════════════════════════════════════════════════
+function renderLoop() {
+  frameId = requestAnimationFrame(renderLoop);
+  if (paused) return;
+
+  const now = startTime ? (Date.now() - startTime) / 1000 : 0;
+
+  // ── 1. Advance the view window if auto-scrolling ──────────
+  if (autoScroll && startTime) {
+    viewXMax = now + windowSec * 0.02;   // tiny right margin
+    viewXMin = Math.max(0, viewXMax - windowSec);
+  }
+
+  // ── 2. Push the view into Chart.js ───────────────────────
+  chart.options.scales.x.min = viewXMin;
+  chart.options.scales.x.max = viewXMax;
+
+  // ── 3. Slice each channel buffer to the visible window ───
+  chOrder.forEach((name, i) => {
+    const ch = channels[name];
+    const ds = chartData.datasets[i];
+    if (!ds) return;
+    ds.data = sliceWindow(ch.buf, viewXMin, viewXMax);
+  });
+
+  // ── 4. Render ─────────────────────────────────────────────
+  chart.update('none');
+}
+
+// Binary-search window slice — O(log n) + O(window size)
+function sliceWindow(buf, xMin, xMax) {
+  if (!buf.length) return buf;
+  // left boundary: one point before xMin for clean line entry
+  let lo = 0, hi = buf.length;
+  while (lo < hi) { const m = (lo+hi)>>1; buf[m].x < xMin ? lo=m+1 : hi=m; }
+  const left = Math.max(0, lo - 1);
+  // right boundary: one point after xMax for clean line exit
+  let ro = lo, rhi = buf.length;
+  while (ro < rhi) { const m = (ro+rhi)>>1; buf[m].x <= xMax ? ro=m+1 : rhi=m; }
+  const right = Math.min(buf.length, ro + 1);
+  return buf.slice(left, right);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  DATA INGESTION
+// ═══════════════════════════════════════════════════════════
+function ingestLine(raw) {
+  const line = raw.trim();
+  if (!line) return;
+  appendMonitor(line, 'in');
+
+  const nums = line.split(/[\t ,;]+/).map(Number).filter(v => !isNaN(v));
+  if (!nums.length) return;
+
+  if (!startTime) startTime = Date.now();
+  sampleCount++;
+  const x = (Date.now() - startTime) / 1000;
+
+  nums.forEach((val, i) => {
+    const name = `CH${i + 1}`;
+    if (!channels[name]) createChannel(name, i);
+    const ch = channels[name];
+    ch.buf.push({ x, y: val });
+    if (ch.buf.length > BUFFER_MAX) ch.buf.shift();
+    ch.last = val;
+    if (val < ch.min) ch.min = val;
+    if (val > ch.max) ch.max = val;
+    ch.sum += val;
+    ch.n++;
+  });
+
+  updateSidebar();
+  updateStats();
+}
+
+function createChannel(name, idx) {
+  channels[name] = { buf:[], color: PALETTE[idx % PALETTE.length], hidden: false, last: null, min: Infinity, max: -Infinity, sum: 0, n: 0 };
+  chOrder.push(name);
+  chartData.datasets.push({
+    label: name,
+    data:  [],
+    borderColor:     channels[name].color,
+    backgroundColor: channels[name].color + '15',
+    borderWidth: 1.5,
+    pointRadius: 0,
+    pointHoverRadius: 3,
+    tension: 0,
+    fill: false,
+    clip: true,
+    cubicInterpolationMode: 'default'
+  });
+  rebuildSidebarDOM();  // stable DOM build — only called when channel count changes
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SERIAL
+// ═══════════════════════════════════════════════════════════
+async function toggleConnect() {
+  connected ? await disconnect() : await connect();
+}
+
+async function connect() {
+  if (!('serial' in navigator)) {
+    document.getElementById('noSerialWarn').style.display = 'block';
+    return;
+  }
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: parseInt(document.getElementById('baudSel').value) });
+    connected = true;
+    setConnectedUI(true);
+    appendMonitor(`Connected @ ${document.getElementById('baudSel').value} baud`, 'sys');
+    readLoop();
+  } catch(e) {
+    appendMonitor('Connection failed: ' + e.message, 'sys');
+  }
+}
+
+async function disconnect() {
+  connected = false;
+  setConnectedUI(false);
+
+  // 1. Cancel the reader — this signals the readable side of the TextDecoderStream
+  if (reader) {
+    try { await reader.cancel(); } catch {}
+    try { reader.releaseLock(); } catch {}
+    reader = null;
+  }
+
+  // 2. Abort the pipeTo() — this closes the writable side and unlocks port.readable
+  if (pipeAbortController) {
+    pipeAbortController.abort();
+    pipeAbortController = null;
+  }
+
+  // 3. Wait for the pipe to fully unwind before touching the port
+  if (pipeClosedPromise) {
+    try { await pipeClosedPromise; } catch {}
+    pipeClosedPromise = null;
+  }
+
+  // 4. Now the port is fully unlocked — safe to close
+  if (port) {
+    try { await port.close(); } catch {}
+    port = null;
+  }
+
+  appendMonitor('Disconnected', 'sys');
+}
+
+async function readLoop() {
+  const tds = new TextDecoderStream();
+
+  // Store an AbortController so disconnect() can abort the pipe
+  pipeAbortController = new AbortController();
+  pipeClosedPromise   = port.readable.pipeTo(tds.writable, { signal: pipeAbortController.signal })
+    .catch(() => {});   // AbortError on disconnect is expected — swallow it
+
+  reader = tds.readable.getReader();
+  let buf = '';
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += value;
+      let idx;
+      while ((idx = buf.indexOf('\n')) !== -1) {
+        const line = buf.slice(0, idx);
+        buf = buf.slice(idx + 1);
+        if (line.trim()) ingestLine(line);
+      }
+    }
+  } catch(e) {
+    if (connected) appendMonitor('Read error: ' + e.message, 'sys');
+  } finally {
+    try { reader.releaseLock(); } catch {}
+  }
+}
+
+function setConnectedUI(on) {
+  document.getElementById('statusDot').className = 'status-dot' + (on ? ' on' : '');
+  const btn = document.getElementById('connectBtn');
+  btn.textContent = on ? 'Disconnect' : 'Connect';
+  btn.className   = 'btn ' + (on ? 'danger' : 'primary');
+  document.getElementById('pauseBtn').disabled = !on;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CONTROLS
+// ═══════════════════════════════════════════════════════════
+function togglePause() {
+  paused = !paused;
+  document.getElementById('pauseBtn').textContent = paused ? '▶ Resume' : '⏸ Pause';
+  document.getElementById('pausedBadge').className = 'paused-badge' + (paused ? ' visible' : '');
+}
+
+function onPointsChange(v) {
+  const pts = Math.max(50, Math.min(10000, parseInt(v) || 500));
+  windowSec = pts / 50;  // assume 50 Hz default, gives natural window size
+}
+
+function clearAll() {
+  chOrder.length = 0;
+  Object.keys(channels).forEach(k => delete channels[k]);
+  chartData.datasets.length = 0;
+  sampleCount = 0;
+  startTime   = null;
+  viewXMin = 0;
+  viewXMax = windowSec;
+  autoScroll = true;
+  updateResumeBtn();
+  document.getElementById('chList').innerHTML = '<div class="no-ch">No data yet.<br>Connect your<br>Arduino.</div>';
+  document.getElementById('statsGrid').innerHTML = '';
+  appendMonitor('Data cleared', 'sys');
+}
+
+function exportCSV() {
+  if (!chOrder.length) { alert('No data to export.'); return; }
+  const maxLen = Math.max(...chOrder.map(n => channels[n].buf.length));
+  const rows = [['time_s', ...chOrder].join(',')];
+  for (let i = 0; i < maxLen; i++) {
+    const t = channels[chOrder[0]].buf[i]?.x.toFixed(4) ?? '';
+    rows.push([t, ...chOrder.map(n => { const d = channels[n].buf; return d[i] !== undefined ? d[i].y : ''; })].join(','));
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([rows.join('\n')], { type:'text/csv' }));
+  a.download = `serialscope_${Date.now()}.csv`;
+  a.click();
+  appendMonitor('CSV exported', 'sys');
+}
+
+function setYFixed() {
+  yAuto = false;
+  document.getElementById('yScaleLabel').textContent = 'Fixed';
+}
+
+function setYAuto() {
+  yAuto = true;
+  delete chart.options.scales.y.min;
+  delete chart.options.scales.y.max;
+  document.getElementById('yScaleLabel').textContent = 'Auto';
+}
+
+function switchTab(tab, el) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('monitorPanel').style.display = tab === 'monitor' ? 'block' : 'none';
+  document.getElementById('statsPanel').style.display   = tab === 'stats'   ? 'block' : 'none';
+}
+
+function resumeScroll() {
+  autoScroll = true;
+  updateResumeBtn();
+  appendMonitor('Auto-scroll resumed', 'sys');
+}
+
+function updateResumeBtn() {
+  document.getElementById('resumeBtn').className = 'scroll-badge' + (autoScroll ? '' : ' visible');
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SIDEBAR & STATS
+// ═══════════════════════════════════════════════════════════
+
+// Build a stable DOM row for a channel — called once per new channel
+function buildSidebarRow(name) {
+  const ch = document.createElement('div');
+  ch.className = 'channel-item';
+  ch.dataset.ch = name;
+  ch.innerHTML = `
+    <div class="ch-dot" style="background:${channels[name].color}"></div>
+    <div class="ch-name">${name}</div>
+    <div class="ch-val" style="color:${channels[name].color}" data-val="${name}">—</div>`;
+  // Single-click OR double-click both toggle visibility
+  ch.addEventListener('click', () => toggleCh(name));
+  document.getElementById('chList').innerHTML = '';   // clear "no data" placeholder on first add
+  document.getElementById('chList').appendChild(ch);
+}
+
+function rebuildSidebarDOM() {
+  const list = document.getElementById('chList');
+  list.innerHTML = '';
+  chOrder.forEach(name => {
+    const row = document.createElement('div');
+    row.className = 'channel-item';
+    row.dataset.ch = name;
+    row.innerHTML = `
+      <div class="ch-dot" style="background:${channels[name].color}"></div>
+      <div class="ch-name">${name}</div>
+      <div class="ch-val" style="color:${channels[name].color}" data-val="${name}">—</div>`;
+    row.addEventListener('click', () => toggleCh(name));
+    list.appendChild(row);
+  });
+}
+
+// Called every ingestLine — only updates the value text, never rebuilds DOM
+function updateSidebar() {
+  chOrder.forEach(name => {
+    const ch  = channels[name];
+    const val = ch.last !== null ? ch.last.toFixed(3) : '—';
+    // Update value span
+    const valEl = document.querySelector(`[data-val="${name}"]`);
+    if (valEl) valEl.textContent = val;
+    // Update muted state on the row
+    const row = document.querySelector(`.channel-item[data-ch="${name}"]`);
+    if (row) row.className = 'channel-item' + (ch.hidden ? ' muted' : '');
+  });
+}
+
+function toggleCh(name) {
+  const ch = channels[name];
+  if (!ch) return;
+  ch.hidden = !ch.hidden;
+  const ds = chartData.datasets.find(d => d.label === name);
+  if (ds) ds.hidden = ch.hidden;
+  // Just update the muted class — no full rebuild needed
+  const row = document.querySelector(`.channel-item[data-ch="${name}"]`);
+  if (row) row.className = 'channel-item' + (ch.hidden ? ' muted' : '');
+}
+
+function updateStats() {
+  const elapsed = startTime ? ((Date.now() - startTime) / 1000) : 0;
+  const rate = elapsed > 0 ? (sampleCount / elapsed).toFixed(1) : '—';
+  let html = `
+    <div class="stat-card"><div class="stat-lbl">Samples</div><div class="stat-val">${sampleCount}<span class="stat-unit">pts</span></div></div>
+    <div class="stat-card"><div class="stat-lbl">Rate</div><div class="stat-val">${rate}<span class="stat-unit">Hz</span></div></div>
+    <div class="stat-card"><div class="stat-lbl">Elapsed</div><div class="stat-val">${elapsed.toFixed(1)}<span class="stat-unit">s</span></div></div>`;
+  chOrder.forEach(name => {
+    const ch = channels[name];
+    const avg = ch.n > 0 ? (ch.sum/ch.n).toFixed(3) : '—';
+    const rng = ch.min !== Infinity ? `${ch.min.toFixed(2)} → ${ch.max.toFixed(2)}` : '—';
+    html += `<div class="stat-card" style="border-color:${ch.color}30">
+      <div class="stat-lbl" style="color:${ch.color}">${name}</div>
+      <div class="stat-val" style="font-size:13px">${ch.last !== null ? ch.last.toFixed(4) : '—'}</div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:3px">avg ${avg}</div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--text3)">${rng}</div>
+    </div>`;
+  });
+  document.getElementById('statsGrid').innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MONITOR
+// ═══════════════════════════════════════════════════════════
+function appendMonitor(text, cls = '') {
+  const panel = document.getElementById('monitorPanel');
+  const div = document.createElement('div');
+  div.className = 'mon-line' + (cls ? ' ' + cls : '');
+  div.textContent = cls === 'sys' ? `— ${text} —` : text;
+  panel.appendChild(div);
+  monLines++;
+  if (monLines > MON_MAX) { panel.removeChild(panel.firstChild); monLines--; }
+  panel.scrollTop = panel.scrollHeight;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MOUSE / WHEEL INTERACTION
+//  Rule: wheel on X or plot → zoom windowSec (keep autoScroll)
+//        drag on X axis     → pan (disables autoScroll)
+//        drag on Y axis     → pan Y
+//        dblclick X axis    → reset to autoScroll + default window
+//        dblclick Y axis    → reset Y to auto
+// ═══════════════════════════════════════════════════════════
+const canvasEl = document.getElementById('chart');
+
+canvasEl.addEventListener('mousemove', e => {
+  const r  = canvasEl.getBoundingClientRect();
+  mouseXpx = e.clientX - r.left;
+  mouseYpx = e.clientY - r.top;
+  const ca = chart.chartArea;
+  if (!ca) return;
+  const inPlot  = mouseXpx >= ca.left && mouseXpx <= ca.right && mouseYpx >= ca.top    && mouseYpx <= ca.bottom;
+  const onXAxis = mouseXpx >= ca.left && mouseXpx <= ca.right && mouseYpx >  ca.bottom;
+  const onYAxis = mouseXpx <  ca.left                         && mouseYpx >= ca.top    && mouseYpx <= ca.bottom;
+  mouseZone = onXAxis ? 'x' : onYAxis ? 'y' : inPlot ? 'plot' : 'none';
+  updateCursor();
+});
+
+canvasEl.addEventListener('mouseleave', () => { mouseZone = 'none'; canvasEl.style.cursor = 'default'; });
+
+function updateCursor() {
+  if (isDragging) { canvasEl.style.cursor = dragAxis === 'x' ? 'ew-resize' : 'ns-resize'; return; }
+  canvasEl.style.cursor = mouseZone === 'x' ? 'ew-resize' : mouseZone === 'y' ? 'ns-resize' : 'crosshair';
+}
+
+// ── Wheel zoom ──────────────────────────────────────────────
+canvasEl.addEventListener('wheel', e => {
+  if (mouseZone === 'none') return;
+  e.preventDefault();
+  const factor = e.deltaY > 0 ? 1.18 : 1 / 1.18;
+  if (mouseZone === 'x' || mouseZone === 'plot') zoomX(factor);
+  if (mouseZone === 'y' || mouseZone === 'plot') zoomY(factor);
+}, { passive: false });
+
+function zoomX(factor) {
+  // Zoom changes windowSec (the width). Auto-scroll stays ON.
+  // The pivot point in data-space is the cursor position.
+  const ca = chart.chartArea;
+  const t  = (mouseXpx - ca.left) / (ca.right - ca.left);  // 0..1 across plot
+  const pivot = viewXMin + t * (viewXMax - viewXMin);       // data-space pivot
+
+  const newWindow = Math.max(0.5, Math.min(600, windowSec * factor));
+
+  if (autoScroll) {
+    // In auto-scroll mode, just change the window width.
+    // The render loop will re-position everything next frame.
+    windowSec = newWindow;
+  } else {
+    // User has panned — keep the pivot point fixed on screen while zooming.
+    const ratio = (pivot - viewXMin) / (viewXMax - viewXMin);
+    viewXMin = pivot - ratio * newWindow;
+    viewXMax = viewXMin + newWindow;
+    windowSec = newWindow;
+  }
+}
+
+function zoomY(factor) {
+  const ca = chart.chartArea;
+  const t  = (mouseYpx - ca.top) / (ca.bottom - ca.top);
+  const yScale = chart.scales.y;
+  if (!yScale) return;
+  const pivot  = yScale.max - t * (yScale.max - yScale.min);
+  const range  = yScale.max - yScale.min;
+  const newRange = range * factor;
+  const ratio  = (pivot - yScale.min) / range;
+  chart.options.scales.y.min = pivot - ratio * newRange;
+  chart.options.scales.y.max = pivot - ratio * newRange + newRange;
+  setYFixed();
+}
+
+// ── Drag pan ────────────────────────────────────────────────
+canvasEl.addEventListener('mousedown', e => {
+  if (mouseZone === 'x' || mouseZone === 'y') {
+    isDragging   = true;
+    dragAxis     = mouseZone;
+    dragStartPx  = dragAxis === 'x' ? e.clientX : e.clientY;
+    dragStartMin = dragAxis === 'x' ? viewXMin : (chart.scales.y?.min ?? -10);
+    dragStartMax = dragAxis === 'x' ? viewXMax : (chart.scales.y?.max ??  10);
+    e.preventDefault();
+    updateCursor();
+  }
+});
+
+window.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+  const ca    = chart.chartArea;
+  const range = dragStartMax - dragStartMin;
+
+  if (dragAxis === 'x') {
+    const pxRange  = ca.right - ca.left;
+    const deltaPx  = e.clientX - dragStartPx;
+    const deltaVal = -(deltaPx / pxRange) * range;
+    viewXMin = dragStartMin + deltaVal;
+    viewXMax = dragStartMax + deltaVal;
+    autoScroll = false;
+    updateResumeBtn();
+  } else {
+    const pxRange  = ca.bottom - ca.top;
+    const deltaPx  = e.clientY - dragStartPx;
+    const deltaVal = (deltaPx / pxRange) * range;
+    chart.options.scales.y.min = dragStartMin + deltaVal;
+    chart.options.scales.y.max = dragStartMax + deltaVal;
+    setYFixed();
+  }
+});
+
+window.addEventListener('mouseup', () => {
+  if (isDragging) { isDragging = false; dragAxis = null; updateCursor(); }
+});
+
+// ── Double-click reset ──────────────────────────────────────
+canvasEl.addEventListener('dblclick', () => {
+  if (mouseZone === 'x' || mouseZone === 'plot') {
+    autoScroll = true;
+    windowSec  = parseInt(document.getElementById('pointsIn').value || 500) / 50;
+    updateResumeBtn();
+    appendMonitor('X axis: auto-scroll resumed', 'sys');
+  }
+  if (mouseZone === 'y' || mouseZone === 'plot') {
+    setYAuto();
+    appendMonitor('Y axis: auto-scale resumed', 'sys');
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════════
+if (!('serial' in navigator)) {
+  document.getElementById('noSerialWarn').style.display = 'block';
+}
+
+// Default window width from points input
+windowSec = parseInt(document.getElementById('pointsIn').value) / 50;
+
+// Kick off the render loop
+renderLoop();
+</script>
+</body>
+</html>
